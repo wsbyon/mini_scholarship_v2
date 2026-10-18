@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>장학금 신청 지원 — 관리자</title>
+  <style>
+    body { font-family: sans-serif; max-width: 860px; margin: 32px auto; padding: 0 16px; color: #1f2430; }
+    .card { border: 1px solid #d6dae3; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+    .kind { display: inline-block; padding: 2px 10px; border-radius: 6px; background: #fff1e6; color: #b4470c; font-weight: bold; }
+    .muted { color: #5b6474; font-size: 13px; }
+    pre { background: #f4f4f4; padding: 10px; white-space: pre-wrap; max-height: 180px; overflow: auto; }
+    input, button { padding: 6px 10px; margin: 2px 4px 2px 0; }
+    #err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <h1>관리자 검토 <span class="muted"><a href="/">학생 화면</a> · 5초마다 자동 새로고침</span></h1>
+  <button onclick="load()">새로고침</button>
+  <p id="err"></p>
+  <div id="list"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const HINT = { income: '소득분위 상한 (예: 8)', grade: '학년 (예: 1,2,3,4)', region: '시·도 또는 전국 (예: 부산)' };
+
+    async function api(method, url, body) {
+      const res = await fetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status + ' ' + (typeof data.detail === 'string' ? data.detail : ''));
+      return data;
+    }
+
+    function el(tag, text, cls) {
+      const e = document.createElement(tag);
+      if (text) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+
+    async function load() {
+      try {
+        $('err').textContent = '';
+        const reviews = await api('GET', '/api/admin/reviews');
+        const list = $('list');
+        list.replaceChildren();
+        if (reviews.length === 0) list.appendChild(el('p', '처리할 검토가 없어요', 'muted'));
+        for (const r of reviews) {
+          const card = el('div', '', 'card');
+          const head = el('div');
+          head.appendChild(el('span', r.kind, 'kind'));
+          head.appendChild(el('b', ' #' + r.id + ' ' + r.title + (r.field ? ' — ' + r.field : '')));
+          card.appendChild(head);
+          card.appendChild(el('pre', r.context || ''));
+          let input = null;
+          if (r.kind === 'REQUIREMENT') {
+            input = el('input');
+            input.placeholder = HINT[r.field] || '기준값';
+            card.appendChild(input);
+          }
+          const ok = el('button', r.kind === 'REQUIREMENT' ? '이 값으로 확정' : '초안 승인');
+          ok.onclick = () => decide(r.id, 'APPROVED', input ? input.value : null);
+          const no = el('button', r.kind === 'REQUIREMENT' ? '조건 아님(반려)' : '반려 → 다시 작성');
+          no.onclick = () => decide(r.id, 'REJECTED', null);
+          card.appendChild(ok);
+          card.appendChild(no);
+          list.appendChild(card);
+        }
+      } catch (e) { $('err').textContent = e.message; }
+    }
+
+    async function decide(id, decision, value) {
+      try {
+        await api('POST', '/api/admin/reviews/' + id + '/decide', { decision, value });
+        load();
+      } catch (e) { $('err').textContent = e.message; }
+    }
+
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

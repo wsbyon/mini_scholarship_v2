@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>장학금 신청 지원 — 학생</title>
+  <style>
+    body { font-family: sans-serif; max-width: 860px; margin: 32px auto; padding: 0 16px; color: #1f2430; }
+    section { border: 1px solid #d6dae3; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    input, button { padding: 6px 10px; margin: 2px 4px 2px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border-bottom: 1px solid #e5e7eb; padding: 6px; text-align: left; font-size: 14px; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 6px; background: #e8eeff; color: #1d4ed8; font-weight: bold; }
+    .muted { color: #5b6474; font-size: 13px; }
+    pre { background: #f4f4f4; padding: 12px; white-space: pre-wrap; }
+    #err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <h1>장학금 신청 지원 <span class="muted">학생 화면 · <a href="/admin.html">관리자 화면</a></span></h1>
+  <p id="err"></p>
+
+  <section>
+    <h2>1. 학생</h2>
+    <div>
+      <input id="name" placeholder="이름">
+      <input id="email" placeholder="이메일">
+      <input id="grade" placeholder="학년" size="4">
+      <input id="region" placeholder="거주지 (예: 서울)" size="12">
+      <button onclick="register()">등록</button>
+      <span class="muted">소득분위는 일부러 비워 둠 → 신청하면 질문이 온다</span>
+    </div>
+    <div>학생 id <input id="sid" value="1" size="4"> <button onclick="loadMatches()">매칭 보기</button></div>
+  </section>
+
+  <section>
+    <h2>2. 매칭 결과</h2>
+    <table><thead><tr><th>공고</th><th>판정</th><th>조건별</th><th></th></tr></thead><tbody id="matches"></tbody></table>
+  </section>
+
+  <section>
+    <h2>3. 신청 상태 <span class="muted">⑪ 2초마다 GET (polling) — <span id="polls">0</span>회</span></h2>
+    <div>신청 id <b id="appId">-</b> · 상태 <span class="badge" id="status">-</span></div>
+    <div id="questionBox" hidden>
+      <p><b>질문:</b> <span id="question"></span></p>
+      <input id="answer" placeholder="답변"> <button onclick="sendAnswer()">답변 보내기</button>
+    </div>
+    <p id="waitingAdmin" class="muted" hidden></p>
+    <pre id="result" hidden></pre>
+  </section>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let appId = null, timer = null, polls = 0;
+
+    async function api(method, url, body) {
+      const res = await fetch(url, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status + ' ' + (typeof data.detail === 'string' ? data.detail : ''));
+      return data;
+    }
+
+    function showError(e) { $('err').textContent = e ? String(e.message || e) : ''; }
+
+    async function register() {
+      try {
+        showError();
+        const grade = $('grade').value ? Number($('grade').value) : null;
+        const s = await api('POST', '/api/students', {
+          name: $('name').value, email: $('email').value || null,
+          grade: grade, region: $('region').value || null,
+        });
+        $('sid').value = s.student_id;
+        await loadMatches();
+      } catch (e) { showError(e); }
+    }
+
+    async function loadMatches() {
+      try {
+        showError();
+        const data = await api('GET', '/api/matches/' + $('sid').value);
+        const body = $('matches');
+        body.replaceChildren();
+        for (const r of data.results) {
+          const tr = document.createElement('tr');
+          const cells = [r.title, r.verdict, Object.entries(r.details).map(([k, v]) => k + ':' + v).join(' ')];
+          for (const text of cells) {
+            const td = document.createElement('td');
+            td.textContent = text;                       // textContent: 글자 그대로 표시 (HTML 로 해석하지 않음)
+            tr.appendChild(td);
+          }
+          const td = document.createElement('td');
+          const btn = document.createElement('button');
+          btn.textContent = '신청';
+          btn.disabled = r.verdict === '불가';
+          btn.onclick = () => apply(r.notice_id);
+          td.appendChild(btn);
+          tr.appendChild(td);
+          body.appendChild(tr);
+        }
+      } catch (e) { showError(e); }
+    }
+
+    async function apply(noticeId) {
+      try {
+        showError();
+        const a = await api('POST', '/api/applications', { student_id: Number($('sid').value), notice_id: noticeId });
+        startPolling(a.application_id);              // 202 를 받으면 바로 polling 시작
+      } catch (e) { showError(e); }
+    }
+
+    function startPolling(id) {
+      appId = id; polls = 0;
+      $('appId').textContent = id;
+      clearInterval(timer);
+      timer = setInterval(poll, 2000);
+      poll();
+    }
+
+    async function poll() {
+      try {
+        const a = await api('GET', '/api/applications/' + appId);   // ⑪ 브라우저 → Nginx → API → DB
+        polls++;
+        $('polls').textContent = polls;
+        $('status').textContent = a.status;
+        $('questionBox').hidden = a.status !== 'WAITING_USER';
+        $('question').textContent = a.question || '';
+        $('waitingAdmin').hidden = a.status !== 'WAITING_ADMIN';
+        $('waitingAdmin').textContent = a.question || '';
+        $('result').hidden = !a.result;
+        $('result').textContent = a.result || '';
+        if (a.status === 'DONE' || a.status === 'FAILED') clearInterval(timer);   // 끝나면 polling 멈춤
+      } catch (e) { showError(e); }
+    }
+
+    async function sendAnswer() {
+      try {
+        showError();
+        await api('POST', '/api/applications/' + appId + '/answer', { answer: $('answer').value });
+        $('answer').value = '';
+        poll();
+      } catch (e) { showError(e); }
+    }
+  </script>
+</body>
+</html>

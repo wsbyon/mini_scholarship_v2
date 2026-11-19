@@ -14,7 +14,7 @@ import db
 API_URL = os.environ.get("PUBLIC_API_URL", "")       # 활용신청 후 Swagger 화면에 나오는 주소
 API_KEY = os.environ.get("PUBLIC_API_KEY", "")       # 일반 인증키(Decoding)
 INTERVAL = int(os.environ.get("COLLECT_INTERVAL_SECONDS", "300"))
-PER_PAGE, MAX_PAGES = 100, 3                          # 연습이라 최대 300건만
+PER_PAGE, MAX_PAGES = 100, 20                         # 모집 중 공고를 찾기 위해 최대 2,000건 조회
 
 SIDO = {"서울": "서울", "부산": "부산", "대구": "대구", "인천": "인천", "광주": "광주", "대전": "대전",
         "울산": "울산", "세종": "세종", "경기": "경기", "강원": "강원", "충청북": "충북", "충북": "충북",
